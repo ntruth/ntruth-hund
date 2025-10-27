@@ -5,20 +5,150 @@ const fs = require('fs');
 const ALLOWED_SEARCH_EXTENSIONS = new Set(['.sql', '.xml']);
 const SCRIPT_EXTENSIONS = new Set(['.sql', '.pck']);
 
+const PLSQL_PREFIXES = [
+  'declare',
+  'begin',
+  'create or replace',
+  'create function',
+  'create procedure',
+  'create package',
+  'create package body',
+  'create trigger',
+  'create type',
+  'create view',
+  'create materialized view',
+  'alter procedure',
+  'alter function',
+  'alter package',
+  'alter trigger'
+];
+
+function getLeadingKeyword(statement) {
+  const normalized = statement.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let inBlockComment = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (line.includes('*/')) {
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (line.startsWith('/*')) {
+      if (!line.includes('*/')) {
+        inBlockComment = true;
+      }
+      continue;
+    }
+
+    if (line.startsWith('--')) {
+      continue;
+    }
+
+    return line.toLowerCase();
+  }
+
+  return '';
+}
+
+function isLikelyPlSqlBlock(statement) {
+  const leading = getLeadingKeyword(statement);
+  if (!leading) {
+    return false;
+  }
+
+  return PLSQL_PREFIXES.some((prefix) => leading.startsWith(prefix));
+}
+
+function splitPlainSqlStatements(segment) {
+  const statements = [];
+  let current = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  const pushCurrent = () => {
+    const trimmed = current.trim();
+    if (trimmed) {
+      statements.push(trimmed.replace(/;+\s*$/u, '').trim());
+    }
+    current = '';
+  };
+
+  for (let index = 0; index < segment.length; index += 1) {
+    const char = segment[index];
+    const next = index + 1 < segment.length ? segment[index + 1] : '';
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (!inBlockComment && char === '-' && next === '-') {
+        inLineComment = true;
+      } else if (!inLineComment && char === '/' && next === '*') {
+        inBlockComment = true;
+      }
+
+      if (inLineComment && char === '\n') {
+        inLineComment = false;
+      }
+
+      if (inBlockComment && char === '*' && next === '/') {
+        current += char;
+        current += next;
+        index += 1;
+        inBlockComment = false;
+        continue;
+      }
+    }
+
+    if (!inLineComment && !inBlockComment) {
+      if (!inDoubleQuote && char === "'") {
+        if (inSingleQuote && next === "'") {
+          current += char;
+          current += next;
+          index += 1;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+      } else if (!inSingleQuote && char === '"') {
+        inDoubleQuote = !inDoubleQuote;
+      }
+
+      if (!inSingleQuote && !inDoubleQuote && char === ';') {
+        pushCurrent();
+        continue;
+      }
+    }
+
+    current += char;
+  }
+
+  pushCurrent();
+
+  return statements;
+}
+
 function splitOracleScriptStatements(script) {
   if (!script) {
     return [];
   }
 
-  const statements = [];
   const normalized = script.replace(/\r\n/g, '\n');
+  const segments = [];
   let buffer = [];
 
   for (const line of normalized.split('\n')) {
     if (line.trim() === '/') {
-      const statement = buffer.join('\n').trim();
-      if (statement) {
-        statements.push(statement);
+      const segment = buffer.join('\n');
+      if (segment.trim()) {
+        segments.push(segment);
       }
       buffer = [];
     } else {
@@ -26,9 +156,21 @@ function splitOracleScriptStatements(script) {
     }
   }
 
-  const trailing = buffer.join('\n').trim();
-  if (trailing) {
-    statements.push(trailing);
+  const trailing = buffer.join('\n');
+  if (trailing.trim()) {
+    segments.push(trailing);
+  }
+
+  const statements = [];
+  for (const segment of segments) {
+    if (isLikelyPlSqlBlock(segment)) {
+      const trimmed = segment.trim();
+      if (trimmed) {
+        statements.push(trimmed);
+      }
+    } else {
+      statements.push(...splitPlainSqlStatements(segment));
+    }
   }
 
   return statements;

@@ -23,6 +23,99 @@ const PLSQL_PREFIXES = [
   'alter trigger'
 ];
 
+const SQLPLUS_SET_OPTIONS = new Set([
+  'define',
+  'echo',
+  'feedback',
+  'heading',
+  'linesize',
+  'pagesize',
+  'serveroutput',
+  'sqlprompt',
+  'termout',
+  'trimout',
+  'trimspool'
+]);
+
+function removeTrailingSlash(statement) {
+  if (!statement) {
+    return statement;
+  }
+  if (/\/\s*(?:--.*)?$/u.test(statement)) {
+    return statement.replace(/\/\s*(?:--.*)?$/u, '').trimEnd();
+  }
+  return statement;
+}
+
+function isSqlPlusDirective(line) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const lower = trimmed.toLowerCase();
+
+  if (lower.startsWith('prompt')) {
+    return true;
+  }
+  if (lower.startsWith('whenever ')) {
+    return true;
+  }
+  if (lower.startsWith('spool ')) {
+    return true;
+  }
+  if (lower.startsWith('host ')) {
+    return true;
+  }
+  if (lower.startsWith('pause')) {
+    return true;
+  }
+  if (lower.startsWith('start ') || lower.startsWith('@@') || lower.startsWith('@')) {
+    return true;
+  }
+  if (lower.startsWith('connect ') || lower.startsWith('disconnect')) {
+    return true;
+  }
+  if (lower === 'exit' || lower.startsWith('exit ')) {
+    return true;
+  }
+  if (lower.startsWith('rem ') || lower === 'rem' || lower.startsWith('remark ')) {
+    return true;
+  }
+  if (lower.startsWith('define ') || lower.startsWith('undef ') || lower.startsWith('undefine ')) {
+    return true;
+  }
+  if (lower.startsWith('column ')) {
+    return true;
+  }
+
+  if (lower.startsWith('set ')) {
+    const [, optionRaw = ''] = lower.split(/\s+/, 2);
+    const option = optionRaw.trim();
+    if (option && SQLPLUS_SET_OPTIONS.has(option)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function stripSqlPlusDirectives(segment) {
+  if (!segment) {
+    return segment;
+  }
+  const lines = segment.split('\n');
+  const filtered = [];
+
+  for (const line of lines) {
+    if (isSqlPlusDirective(line)) {
+      continue;
+    }
+    filtered.push(line);
+  }
+
+  return filtered.join('\n');
+}
+
 function getLeadingKeyword(statement) {
   const normalized = statement.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
@@ -79,7 +172,11 @@ function splitPlainSqlStatements(segment) {
   const pushCurrent = () => {
     const trimmed = current.trim();
     if (trimmed) {
-      statements.push(trimmed.replace(/;+\s*$/u, '').trim());
+      let normalized = trimmed.replace(/;+\s*$/u, '').trim();
+      normalized = removeTrailingSlash(normalized);
+      if (normalized) {
+        statements.push(normalized);
+      }
     }
     current = '';
   };
@@ -145,15 +242,36 @@ function splitOracleScriptStatements(script) {
   let buffer = [];
 
   for (const line of normalized.split('\n')) {
-    if (line.trim() === '/') {
+    const trimmedLine = line.trim();
+    const slashOnly = /^\/\s*(?:--.*)?$/u.test(trimmedLine);
+
+    if (slashOnly) {
       const segment = buffer.join('\n');
       if (segment.trim()) {
         segments.push(segment);
       }
       buffer = [];
-    } else {
-      buffer.push(line);
+      continue;
     }
+
+    if (trimmedLine.includes('/')) {
+      const match = trimmedLine.match(/^(.*?)(\/\s*(?:--.*)?)$/u);
+      if (match && match[1] && match[2] && trimmedLine !== '/') {
+        const cutoff = line.lastIndexOf('/');
+        const beforeSlash = cutoff >= 0 ? line.slice(0, cutoff) : line;
+        if (beforeSlash.trim()) {
+          buffer.push(beforeSlash);
+        }
+        const segment = buffer.join('\n');
+        if (segment.trim()) {
+          segments.push(segment);
+        }
+        buffer = [];
+        continue;
+      }
+    }
+
+    buffer.push(line);
   }
 
   const trailing = buffer.join('\n');
@@ -162,9 +280,14 @@ function splitOracleScriptStatements(script) {
   }
 
   const statements = [];
-  for (const segment of segments) {
+  for (const rawSegment of segments) {
+    const segment = stripSqlPlusDirectives(rawSegment);
+    if (!segment.trim()) {
+      continue;
+    }
+
     if (isLikelyPlSqlBlock(segment)) {
-      const trimmed = segment.trim();
+      const trimmed = removeTrailingSlash(segment.trim());
       if (trimmed) {
         statements.push(trimmed);
       }
@@ -636,3 +759,10 @@ ipcMain.handle('path:reveal', (_event, filePath) => {
   }
   return false;
 });
+
+module.exports = {
+  splitPlainSqlStatements,
+  splitOracleScriptStatements,
+  isLikelyPlSqlBlock,
+  getLeadingKeyword
+};

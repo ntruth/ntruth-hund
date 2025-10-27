@@ -21,6 +21,7 @@ export interface ScriptExecutionPayload {
     port?: number;
     serviceName?: string;
     connectString?: string;
+    clientLibDir?: string;
     configOverrides?: Record<string, unknown>;
   };
 }

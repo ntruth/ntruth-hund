@@ -5,6 +5,76 @@ const fs = require('fs');
 const ALLOWED_SEARCH_EXTENSIONS = new Set(['.sql', '.xml']);
 const SCRIPT_EXTENSIONS = new Set(['.sql', '.pck']);
 
+const oracleClientState = {
+  initialized: false,
+  libDir: null,
+  error: null
+};
+
+function normalizeClientLibDir(libDir) {
+  if (!libDir) {
+    return '';
+  }
+  const trimmed = libDir.trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    return path.normalize(trimmed);
+  } catch (error) {
+    console.warn('Failed to normalize Oracle client library path:', error);
+    return trimmed;
+  }
+}
+
+function ensureOracleClient(oracledb, clientLibDir, onProgress) {
+  if (typeof oracledb.initOracleClient !== 'function') {
+    // Older versions or environments (like Linux with system libraries) may not expose initOracleClient.
+    return { success: true };
+  }
+
+  const normalizedRequestedDir = normalizeClientLibDir(clientLibDir);
+
+  if (oracleClientState.initialized) {
+    if (
+      normalizedRequestedDir &&
+      oracleClientState.libDir &&
+      oracleClientState.libDir !== normalizedRequestedDir
+    ) {
+      const message = 'Oracle 客户端已使用不同的库路径初始化。如需切换，请重启应用后重试。';
+      onProgress?.({ filePath: null, status: 'error', message });
+      return { success: false, message };
+    }
+    return { success: true };
+  }
+
+  try {
+    if (normalizedRequestedDir) {
+      onProgress?.({
+        filePath: null,
+        status: 'running',
+        message: `正在加载 Oracle 客户端库 (${normalizedRequestedDir})...`
+      });
+      oracledb.initOracleClient({ libDir: normalizedRequestedDir });
+    } else {
+      oracledb.initOracleClient();
+    }
+    oracleClientState.initialized = true;
+    oracleClientState.libDir = normalizedRequestedDir || null;
+    oracleClientState.error = null;
+    if (normalizedRequestedDir) {
+      onProgress?.({ filePath: null, status: 'success', message: 'Oracle 客户端库加载成功。' });
+    }
+    return { success: true };
+  } catch (error) {
+    oracleClientState.initialized = false;
+    oracleClientState.error = error;
+    const message = `Oracle 客户端初始化失败：${error.message || error}`;
+    onProgress?.({ filePath: null, status: 'error', message });
+    return { success: false, message };
+  }
+}
+
 async function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -153,7 +223,16 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
     };
   }
 
-  const { user, password, host, port, serviceName, connectString, configOverrides } = connection;
+  const {
+    user,
+    password,
+    host,
+    port,
+    serviceName,
+    connectString,
+    clientLibDir,
+    configOverrides
+  } = connection;
   if (!user || !password) {
     onProgress?.({
       filePath: null,
@@ -183,6 +262,15 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
         results: []
       };
     }
+  }
+
+  const clientInitResult = ensureOracleClient(oracledb, clientLibDir, onProgress);
+  if (!clientInitResult.success) {
+    return {
+      success: false,
+      message: clientInitResult.message,
+      results: []
+    };
   }
 
   const options = {

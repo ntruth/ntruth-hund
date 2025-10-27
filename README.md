@@ -17,3 +17,9 @@ npm run dev
 - 项目已升级到 Vite 5 与 `@vitejs/plugin-vue` 5.x，如遇旧依赖缓存导致的异常（例如开发页空白、`Maximum call stack size exceeded` 报错），请删除 `node_modules` 后重新执行 `npm install`。
 
 > **注意**：执行脚本功能依赖 [`oracledb`](https://www.npmjs.com/package/oracledb) 模块以及对应的 Oracle 客户端库，请在目标运行环境中提前安装并配置。
+
+### Oracle 11g 兼容说明
+
+- 使用 Oracle 11g 或 Instant Client 11g 时，请在“Oracle 连接配置”中填写客户端库目录，以便应用通过 `oracledb.initOracleClient` 正确加载 DLL/so 文件。
+- 如果先前已使用其他路径初始化客户端库，需重启应用后才能切换到新的目录。
+- 建议确认 32/64 位架构一致，并确保将 `oracledb` 模块与匹配版本的客户端库一起部署。

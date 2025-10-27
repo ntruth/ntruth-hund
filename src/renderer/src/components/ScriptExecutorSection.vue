@@ -52,6 +52,13 @@
             placeholder="例如：192.168.1.10:1521/ORCL 或完整的 Easy Connect 字符串"
           />
         </label>
+        <label class="form__field form__field--full">
+          <span>Oracle 客户端库目录（可选，适用于 11g/Instant Client）</span>
+          <input
+            v-model="connection.clientLibDir"
+            placeholder="例如：C:\\oracle\\instantclient_11_2"
+          />
+        </label>
       </div>
     </details>
 
@@ -170,6 +177,7 @@ type ConnectionPayload = {
   port?: number;
   serviceName?: string;
   connectString?: string;
+  clientLibDir?: string;
   configOverrides?: Record<string, unknown>;
 };
 
@@ -180,6 +188,7 @@ const connection = reactive({
   port: 1521,
   serviceName: 'ORCL',
   connectString: '',
+  clientLibDir: '',
   configOverrides: {} as Record<string, unknown>
 });
 
@@ -332,6 +341,11 @@ function buildConnectionPayload(): ConnectionPayload {
   const connectString = connection.connectString.trim();
   if (connectString) {
     payload.connectString = connectString;
+  }
+
+  const clientLibDir = connection.clientLibDir.trim();
+  if (clientLibDir) {
+    payload.clientLibDir = clientLibDir;
   }
 
   const rawOverrides = toRaw(connection.configOverrides);

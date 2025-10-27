@@ -24,6 +24,8 @@
       </button>
     </form>
 
+    <p v-if="searchError" class="alert alert--error">{{ searchError }}</p>
+
     <div class="results" v-if="results.length > 0">
       <div class="results__header">
         <h3>共找到 {{ results.length }} 个匹配文件</h3>
@@ -51,7 +53,7 @@
         </tbody>
       </table>
     </div>
-    <p class="empty" v-else>暂无结果，输入路径与关键字后点击“开始搜索”。</p>
+    <p class="empty" v-else-if="!searchError">暂无结果，输入路径与关键字后点击“开始搜索”。</p>
 
     <div
       v-if="contextMenu.visible"
@@ -66,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, reactive, ref } from 'vue';
+import { onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 type SearchResult = {
   path: string;
@@ -78,6 +80,7 @@ const directory = ref('');
 const keyword = ref('');
 const isSearching = ref(false);
 const results = ref<SearchResult[]>([]);
+const searchError = ref<string | null>(null);
 const contextMenu = reactive({
   visible: false,
   x: 0,
@@ -98,15 +101,26 @@ async function triggerDirectoryDialog() {
 }
 
 async function handleSearch() {
-  if (!directory.value || !keyword.value) {
+  const trimmedDirectory = directory.value.trim();
+  const trimmedKeyword = keyword.value.trim();
+
+  if (!trimmedDirectory || !trimmedKeyword) {
+    searchError.value = '请输入有效的目录与关键字后再试。';
     return;
   }
+
   isSearching.value = true;
+  searchError.value = null;
   try {
-    results.value = await window.api.searchFiles({
-      directory: directory.value,
-      keyword: keyword.value
+    const response = await window.api.searchFiles({
+      directory: trimmedDirectory,
+      keyword: trimmedKeyword
     });
+    results.value = Array.isArray(response) ? [...response] : [];
+  } catch (error: any) {
+    console.error('Failed to search files:', error);
+    searchError.value = error?.message || '搜索过程中出现错误，请稍后重试。';
+    results.value = [];
   } finally {
     isSearching.value = false;
     resetContextMenu();
@@ -149,6 +163,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleGlobalClick);
+});
+
+watch([directory, keyword], () => {
+  if (searchError.value) {
+    searchError.value = null;
+  }
 });
 </script>
 
@@ -206,6 +226,19 @@ onBeforeUnmount(() => {
   outline: none;
   border-color: #2563eb;
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.alert {
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.alert--error {
+  background-color: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+  border: 1px solid rgba(220, 38, 38, 0.3);
 }
 
 .button {

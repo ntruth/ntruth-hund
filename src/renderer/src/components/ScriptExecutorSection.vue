@@ -128,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, toRaw } from 'vue';
 
 type ExecutionStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
 
@@ -162,6 +162,16 @@ const scripts = ref<ScriptItem[]>([]);
 const currentExecutingPath = ref<string | null>(null);
 const executionQueue = ref<string[]>([]);
 const executionLogs = ref<LogEntry[]>([]);
+
+type ConnectionPayload = {
+  user: string;
+  password: string;
+  host?: string;
+  port?: number;
+  serviceName?: string;
+  connectString?: string;
+  configOverrides?: Record<string, unknown>;
+};
 
 const connection = reactive({
   user: '',
@@ -299,25 +309,53 @@ async function executeSelected() {
   await runExecution(selectedScripts.value);
 }
 
-function buildConnectionPayload() {
-  return {
-    user: connection.user,
-    password: connection.password,
-    host: connection.host,
-    port: connection.port,
-    serviceName: connection.serviceName,
-    connectString: connection.connectString.trim() || undefined,
-    configOverrides: connection.configOverrides
+function buildConnectionPayload(): ConnectionPayload {
+  const payload: ConnectionPayload = {
+    user: connection.user.trim(),
+    password: connection.password
   };
+
+  const host = connection.host.trim();
+  if (host) {
+    payload.host = host;
+  }
+
+  if (typeof connection.port === 'number' && !Number.isNaN(connection.port)) {
+    payload.port = connection.port;
+  }
+
+  const serviceName = connection.serviceName.trim();
+  if (serviceName) {
+    payload.serviceName = serviceName;
+  }
+
+  const connectString = connection.connectString.trim();
+  if (connectString) {
+    payload.connectString = connectString;
+  }
+
+  const rawOverrides = toRaw(connection.configOverrides);
+  if (rawOverrides && Object.keys(rawOverrides).length > 0) {
+    payload.configOverrides = JSON.parse(JSON.stringify(rawOverrides));
+  }
+
+  return payload;
 }
 
 function validateConnectionParameters() {
-  if (!connection.user || !connection.password) {
+  const user = connection.user.trim();
+  const password = connection.password;
+
+  if (!user || !password) {
     appendLog(null, 'error', '请填写数据库的用户名和密码。');
     return false;
   }
 
-  const hasBasicConnection = connection.host && connection.port && connection.serviceName;
+  const hasBasicConnection =
+    !!connection.host.trim() &&
+    typeof connection.port === 'number' &&
+    connection.port > 0 &&
+    !!connection.serviceName.trim();
   const hasCustomConnect = !!connection.connectString.trim();
 
   if (!hasBasicConnection && !hasCustomConnect) {
@@ -357,17 +395,19 @@ async function runExecution(items: ScriptItem[]) {
       connection: buildConnectionPayload()
     });
 
-    response.results.forEach((result) => {
+    const executionResults = Array.isArray(response?.results) ? response.results : [];
+
+    executionResults.forEach((result) => {
       const target = scripts.value.find((item) => item.path === result.filePath);
       if (!target) return;
       target.status = result.status as ExecutionStatus;
       target.message = result.message;
     });
 
-    if (!response.success) {
-      const message = response.message || '执行过程中出现错误，请检查配置。';
+    if (!response?.success) {
+      const message = response?.message || '执行过程中出现错误，请检查配置。';
       appendLog(null, 'error', message);
-      if (response.results.length === 0) {
+      if (executionResults.length === 0) {
         scripts.value.forEach((item) => {
           if (files.includes(item.path)) {
             item.status = 'error';

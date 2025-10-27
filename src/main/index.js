@@ -136,11 +136,16 @@ async function listScripts(directory) {
   return scripts;
 }
 
-async function executeScripts({ files, connection }) {
+async function executeScripts({ files, connection }, { onProgress } = {}) {
   let oracledb;
   try {
     oracledb = require('oracledb');
   } catch (error) {
+    onProgress?.({
+      filePath: null,
+      status: 'error',
+      message: 'Oracle database driver (oracledb) 未安装，无法执行脚本。'
+    });
     return {
       success: false,
       message: 'Oracle database driver (oracledb) is not installed. Please install it before running scripts.',
@@ -150,6 +155,11 @@ async function executeScripts({ files, connection }) {
 
   const { user, password, host, port, serviceName, connectString, configOverrides } = connection;
   if (!user || !password) {
+    onProgress?.({
+      filePath: null,
+      status: 'error',
+      message: '数据库用户名或密码未填写。'
+    });
     return {
       success: false,
       message: '数据库用户名或密码未填写。',
@@ -162,6 +172,11 @@ async function executeScripts({ files, connection }) {
     if (host && port && serviceName) {
       resolvedConnectString = `${host}:${port}/${serviceName}`;
     } else {
+      onProgress?.({
+        filePath: null,
+        status: 'error',
+        message: '请提供完整的主机、端口、服务名或自定义连接字符串。'
+      });
       return {
         success: false,
         message: '请提供完整的主机、端口、服务名或自定义连接字符串。',
@@ -183,12 +198,22 @@ async function executeScripts({ files, connection }) {
     dbConnection = await oracledb.getConnection(options);
     for (const filePath of files) {
       try {
+        onProgress?.({
+          filePath,
+          status: 'running',
+          message: '正在执行...'
+        });
         const script = await fs.promises.readFile(filePath, 'utf8');
         if (!script.trim()) {
           results.push({
             filePath,
             status: 'skipped',
             message: 'File is empty. Skipping execution.'
+          });
+          onProgress?.({
+            filePath,
+            status: 'skipped',
+            message: '脚本内容为空，跳过执行。'
           });
           continue;
         }
@@ -199,15 +224,30 @@ async function executeScripts({ files, connection }) {
           status: 'success',
           message: 'Executed successfully.'
         });
+        onProgress?.({
+          filePath,
+          status: 'success',
+          message: '执行成功。'
+        });
       } catch (error) {
         results.push({
           filePath,
           status: 'error',
           message: error.message
         });
+        onProgress?.({
+          filePath,
+          status: 'error',
+          message: error.message || '执行失败。'
+        });
       }
     }
   } catch (error) {
+    onProgress?.({
+      filePath: null,
+      status: 'error',
+      message: error.message
+    });
     return {
       success: false,
       message: error.message,
@@ -263,7 +303,15 @@ ipcMain.handle('scripts:execute', async (_event, payload) => {
       results: []
     };
   }
-  return executeScripts(payload);
+  return executeScripts(payload, {
+    onProgress: (update) => {
+      try {
+        _event.sender.send('scripts:progress', update);
+      } catch (error) {
+        console.error('Failed to send script progress event:', error);
+      }
+    }
+  });
 });
 
 ipcMain.handle('path:open', async (_event, filePath) => {

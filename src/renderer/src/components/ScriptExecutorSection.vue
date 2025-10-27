@@ -6,8 +6,10 @@
         <p>列出并执行指定目录中的脚本，支持自定义 Oracle 连接</p>
       </div>
       <div class="header-actions">
-        <button class="button" type="button" @click="triggerDirectoryDialog">选择目录</button>
-        <button class="button" type="button" @click="refreshScripts" :disabled="isLoading">
+        <button class="button" type="button" @click="triggerDirectoryDialog" :disabled="isExecuting">
+          选择目录
+        </button>
+        <button class="button" type="button" @click="refreshScripts" :disabled="isLoading || isExecuting">
           {{ isLoading ? '查询中...' : '查询脚本' }}
         </button>
       </div>
@@ -54,10 +56,20 @@
     </details>
 
     <div class="actions">
-      <button class="button button--primary" type="button" @click="executeAll" :disabled="scripts.length === 0">
+      <button
+        class="button button--primary"
+        type="button"
+        @click="executeAll"
+        :disabled="scripts.length === 0 || isExecuting"
+      >
         执行全部
       </button>
-      <button class="button" type="button" @click="executeSelected" :disabled="selectedScripts.length === 0">
+      <button
+        class="button"
+        type="button"
+        @click="executeSelected"
+        :disabled="selectedScripts.length === 0 || isExecuting"
+      >
         执行选中
       </button>
     </div>
@@ -67,7 +79,7 @@
         <thead>
           <tr>
             <th style="width: 48px">
-              <input type="checkbox" :checked="areAllSelected" @change="toggleSelectAll" />
+              <input type="checkbox" :checked="areAllSelected" @change="toggleSelectAll" :disabled="isExecuting" />
             </th>
             <th>文件名</th>
             <th>执行状态</th>
@@ -75,9 +87,13 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in scripts" :key="item.path" :class="[`status--${item.status}`]">
+          <tr
+            v-for="item in scripts"
+            :key="item.path"
+            :class="[`status--${item.status}`, { 'row--active': item.path === currentExecutingPath }]"
+          >
             <td>
-              <input type="checkbox" v-model="item.selected" />
+              <input type="checkbox" v-model="item.selected" :disabled="isExecuting" />
             </td>
             <td class="path" @dblclick="openFile(item.path)">{{ item.name }}</td>
             <td>
@@ -91,23 +107,60 @@
       </table>
       <p v-else class="empty">暂无脚本，请先选择目录后点击“查询脚本”。</p>
     </div>
+
+    <section class="logs" v-if="executionLogs.length > 0">
+      <header class="logs__header">
+        <h3>执行日志</h3>
+        <button class="button button--ghost" type="button" @click="clearLogs" :disabled="isExecuting">
+          清空日志
+        </button>
+      </header>
+      <ul class="logs__list">
+        <li v-for="entry in executionLogs" :key="entry.id" :data-status="entry.status">
+          <span class="logs__time">{{ entry.timestamp }}</span>
+          <span class="logs__name" v-if="entry.filePath">{{ entry.name }}</span>
+          <span class="logs__status">{{ statusText(entry.status) }}</span>
+          <span class="logs__message">{{ entry.message }}</span>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+
+type ExecutionStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
 
 interface ScriptItem {
   path: string;
   name: string;
   selected: boolean;
-  status: 'pending' | 'success' | 'error' | 'skipped';
+  status: ExecutionStatus;
   message: string;
+}
+
+interface ProgressPayload {
+  filePath: string | null;
+  status: ExecutionStatus;
+  message: string;
+}
+
+interface LogEntry {
+  id: number;
+  filePath: string | null;
+  name: string;
+  status: ExecutionStatus;
+  message: string;
+  timestamp: string;
 }
 
 const directory = ref('');
 const isLoading = ref(false);
+const isExecuting = ref(false);
 const scripts = ref<ScriptItem[]>([]);
+const currentExecutingPath = ref<string | null>(null);
+const executionLogs = ref<LogEntry[]>([]);
 
 const connection = reactive({
   user: '',
@@ -122,8 +175,23 @@ const connection = reactive({
 const selectedScripts = computed(() => scripts.value.filter((item) => item.selected));
 const areAllSelected = computed(() => scripts.value.length > 0 && selectedScripts.value.length === scripts.value.length);
 
-function statusText(status: ScriptItem['status']) {
+let disposeProgressListener: (() => void) | null = null;
+let logCounter = 0;
+
+onMounted(() => {
+  if (typeof window.api?.onScriptProgress === 'function') {
+    disposeProgressListener = window.api.onScriptProgress(handleProgress);
+  }
+});
+
+onBeforeUnmount(() => {
+  disposeProgressListener?.();
+});
+
+function statusText(status: ExecutionStatus) {
   switch (status) {
+    case 'running':
+      return '执行中';
     case 'success':
       return '成功';
     case 'error':
@@ -132,6 +200,51 @@ function statusText(status: ScriptItem['status']) {
       return '跳过';
     default:
       return '未执行';
+  }
+}
+
+function appendLog(filePath: string | null, status: ExecutionStatus, message: string) {
+  const timestamp = new Date().toLocaleTimeString();
+  const name = filePath ? filePath.split(/[/\\]/).pop() || filePath : '系统';
+  executionLogs.value.push({
+    id: ++logCounter,
+    filePath,
+    name,
+    status,
+    message: message || '',
+    timestamp
+  });
+
+  if (executionLogs.value.length > 500) {
+    executionLogs.value.shift();
+  }
+}
+
+function handleProgress(payload: ProgressPayload) {
+  const { filePath, status, message } = payload;
+  appendLog(filePath, status, message);
+
+  if (!filePath) {
+    return;
+  }
+
+  const target = scripts.value.find((item) => item.path === filePath);
+  if (!target) {
+    return;
+  }
+
+  target.status = status;
+  if (message) {
+    target.message = message;
+  }
+
+  if (status === 'running') {
+    currentExecutingPath.value = filePath;
+    target.selected = true;
+  } else if (status === 'success' || status === 'error' || status === 'skipped') {
+    if (currentExecutingPath.value === filePath) {
+      currentExecutingPath.value = null;
+    }
   }
 }
 
@@ -153,7 +266,7 @@ async function refreshScripts() {
     scripts.value = data.map((item) => ({
       ...item,
       selected: true,
-      status: 'pending',
+      status: 'pending' as ExecutionStatus,
       message: ''
     }));
   } finally {
@@ -169,6 +282,9 @@ function toggleSelectAll(event: Event) {
 }
 
 async function executeAll() {
+  if (scripts.value.length === 0) {
+    return;
+  }
   scripts.value.forEach((item) => {
     item.selected = true;
   });
@@ -192,9 +308,10 @@ function buildConnectionPayload() {
 }
 
 async function runExecution(items: ScriptItem[]) {
-  if (items.length === 0) {
+  if (items.length === 0 || isExecuting.value) {
     return;
   }
+
   const files = items.map((item) => item.path);
   scripts.value.forEach((item) => {
     if (files.includes(item.path)) {
@@ -203,31 +320,59 @@ async function runExecution(items: ScriptItem[]) {
     }
   });
 
-  const response = await window.api.executeScripts({
-    files,
-    connection: buildConnectionPayload()
-  });
+  appendLog(null, 'running', `开始执行 ${files.length} 个脚本...`);
+  isExecuting.value = true;
+  currentExecutingPath.value = null;
 
-  response.results.forEach((result) => {
-    const target = scripts.value.find((item) => item.path === result.filePath);
-    if (!target) return;
-    target.status = result.status;
-    target.message = result.message;
-  });
+  try {
+    const response = await window.api.executeScripts({
+      files,
+      connection: buildConnectionPayload()
+    });
 
-  if (!response.success) {
-    const message = response.message || '执行过程中出现错误，请检查配置。';
-    if (response.results.length === 0) {
-      scripts.value.forEach((item) => {
+    response.results.forEach((result) => {
+      const target = scripts.value.find((item) => item.path === result.filePath);
+      if (!target) return;
+      target.status = result.status as ExecutionStatus;
+      target.message = result.message;
+    });
+
+    if (!response.success) {
+      const message = response.message || '执行过程中出现错误，请检查配置。';
+      appendLog(null, 'error', message);
+      if (response.results.length === 0) {
+        scripts.value.forEach((item) => {
+          if (files.includes(item.path)) {
+            item.status = 'error';
+            item.message = message;
+          }
+        });
+      }
+    } else {
+      appendLog(null, 'success', '脚本执行完成。');
+    }
+  } catch (error: any) {
+    const message = error?.message || '执行过程中发生异常。';
+    appendLog(null, 'error', message);
+    scripts.value.forEach((item) => {
+      if (files.includes(item.path)) {
         item.status = 'error';
         item.message = message;
-      });
-    }
+      }
+    });
+  } finally {
+    isExecuting.value = false;
+    currentExecutingPath.value = null;
   }
 }
 
 async function openFile(filePath: string) {
   await window.api.openFile(filePath);
+}
+
+function clearLogs() {
+  executionLogs.value = [] as LogEntry[];
+  logCounter = 0;
 }
 </script>
 
@@ -273,6 +418,11 @@ async function openFile(filePath: string) {
   transition: background-color 0.2s ease, transform 0.1s ease;
 }
 
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .button:hover {
   background-color: #d1d5db;
 }
@@ -288,6 +438,15 @@ async function openFile(filePath: string) {
 
 .button--primary:hover {
   background-color: #15803d;
+}
+
+.button--ghost {
+  background-color: transparent;
+  border: 1px solid #e5e7eb;
+}
+
+.button--ghost:hover {
+  background-color: rgba(148, 163, 184, 0.15);
 }
 
 .form {
@@ -371,6 +530,10 @@ async function openFile(filePath: string) {
   background-color: #f8fafc;
 }
 
+.row--active {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+}
+
 .path {
   font-family: 'Cascadia Code', 'Consolas', monospace;
   color: #1f2937;
@@ -389,6 +552,10 @@ async function openFile(filePath: string) {
   color: #15803d;
 }
 
+.status[data-status='running'] {
+  color: #2563eb;
+}
+
 .status[data-status='error'] {
   color: #dc2626;
 }
@@ -402,6 +569,85 @@ async function openFile(filePath: string) {
   padding: 24px;
   text-align: center;
   color: #9ca3af;
+}
+
+.logs {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px 20px;
+  background-color: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.logs__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logs__header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.logs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.logs__list li {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+
+.logs__list li[data-status='success'] {
+  border-color: rgba(22, 163, 74, 0.35);
+}
+
+.logs__list li[data-status='error'] {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+.logs__list li[data-status='running'] {
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.logs__time {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: #64748b;
+}
+
+.logs__name {
+  font-weight: 600;
+  color: #0f172a;
+  margin-right: 8px;
+}
+
+.logs__status {
+  font-weight: 600;
+  color: #2563eb;
+  margin-right: 8px;
+}
+
+.logs__message {
+  color: #475569;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 768px) {

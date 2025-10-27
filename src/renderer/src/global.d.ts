@@ -1,6 +1,14 @@
+export type ScriptExecutionStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
+
 export interface ScriptExecutionResult {
   filePath: string;
-  status: 'success' | 'error' | 'skipped';
+  status: Exclude<ScriptExecutionStatus, 'pending' | 'running'>;
+  message: string;
+}
+
+export interface ScriptExecutionProgress {
+  filePath: string | null;
+  status: ScriptExecutionStatus;
   message: string;
 }
 
@@ -32,6 +40,7 @@ declare global {
       }>;
       openFile: (filePath: string) => Promise<boolean>;
       revealFile: (filePath: string) => Promise<boolean>;
+      onScriptProgress: (callback: (payload: ScriptExecutionProgress) => void) => () => void;
     };
   }
 }

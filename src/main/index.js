@@ -5,6 +5,35 @@ const fs = require('fs');
 const ALLOWED_SEARCH_EXTENSIONS = new Set(['.sql', '.xml']);
 const SCRIPT_EXTENSIONS = new Set(['.sql', '.pck']);
 
+function splitOracleScriptStatements(script) {
+  if (!script) {
+    return [];
+  }
+
+  const statements = [];
+  const normalized = script.replace(/\r\n/g, '\n');
+  let buffer = [];
+
+  for (const line of normalized.split('\n')) {
+    if (line.trim() === '/') {
+      const statement = buffer.join('\n').trim();
+      if (statement) {
+        statements.push(statement);
+      }
+      buffer = [];
+    } else {
+      buffer.push(line);
+    }
+  }
+
+  const trailing = buffer.join('\n').trim();
+  if (trailing) {
+    statements.push(trailing);
+  }
+
+  return statements;
+}
+
 const oracleClientState = {
   initialized: false,
   libDir: null,
@@ -295,6 +324,8 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
       message: '数据库连接成功。'
     });
     for (const filePath of files) {
+      let statements = [];
+      let failedSegmentIndex = null;
       try {
         onProgress?.({
           filePath,
@@ -302,7 +333,8 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
           message: '正在执行...'
         });
         const script = await fs.promises.readFile(filePath, 'utf8');
-        if (!script.trim()) {
+        statements = splitOracleScriptStatements(script);
+        if (!statements.length) {
           results.push({
             filePath,
             status: 'skipped',
@@ -316,27 +348,62 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
           continue;
         }
 
-        await dbConnection.execute(script, [], { autoCommit: true });
+        if (statements.length > 1) {
+          onProgress?.({
+            filePath,
+            status: 'running',
+            message: `脚本包含 ${statements.length} 段，将依次执行。`
+          });
+        }
+
+        for (let index = 0; index < statements.length; index += 1) {
+          const statement = statements[index];
+          if (statements.length > 1) {
+            onProgress?.({
+              filePath,
+              status: 'running',
+              message: `正在执行第 ${index + 1}/${statements.length} 段...`
+            });
+          }
+          try {
+            await dbConnection.execute(statement, [], { autoCommit: true });
+          } catch (segmentError) {
+            failedSegmentIndex = index;
+            throw segmentError;
+          }
+        }
         results.push({
           filePath,
           status: 'success',
-          message: 'Executed successfully.'
+          message:
+            statements.length > 1
+              ? `Executed ${statements.length} segments successfully.`
+              : 'Executed successfully.'
         });
         onProgress?.({
           filePath,
           status: 'success',
-          message: '执行成功。'
+          message:
+            statements.length > 1
+              ? `全部 ${statements.length} 段执行成功。`
+              : '执行成功。'
         });
       } catch (error) {
         results.push({
           filePath,
           status: 'error',
-          message: error.message
+          message:
+            statements.length > 1
+              ? `Segment ${typeof failedSegmentIndex === 'number' ? failedSegmentIndex + 1 : '?'} failed: ${error.message}`
+              : error.message
         });
         onProgress?.({
           filePath,
           status: 'error',
-          message: error.message || '执行失败。'
+          message:
+            statements.length > 1
+              ? `第 ${typeof failedSegmentIndex === 'number' ? failedSegmentIndex + 1 : '?'} 段执行失败：${error.message || '执行失败。'}`
+              : error.message || '执行失败。'
         });
       }
     }

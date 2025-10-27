@@ -160,6 +160,7 @@ const isLoading = ref(false);
 const isExecuting = ref(false);
 const scripts = ref<ScriptItem[]>([]);
 const currentExecutingPath = ref<string | null>(null);
+const executionQueue = ref<string[]>([]);
 const executionLogs = ref<LogEntry[]>([]);
 
 const connection = reactive({
@@ -242,8 +243,11 @@ function handleProgress(payload: ProgressPayload) {
     currentExecutingPath.value = filePath;
     target.selected = true;
   } else if (status === 'success' || status === 'error' || status === 'skipped') {
-    if (currentExecutingPath.value === filePath) {
-      currentExecutingPath.value = null;
+    const currentIndex = executionQueue.value.indexOf(filePath);
+    if (currentIndex !== -1 && currentIndex === executionQueue.value.length - 1) {
+      if (currentExecutingPath.value === filePath) {
+        currentExecutingPath.value = null;
+      }
     }
   }
 }
@@ -307,12 +311,35 @@ function buildConnectionPayload() {
   };
 }
 
+function validateConnectionParameters() {
+  if (!connection.user || !connection.password) {
+    appendLog(null, 'error', '请填写数据库的用户名和密码。');
+    return false;
+  }
+
+  const hasBasicConnection = connection.host && connection.port && connection.serviceName;
+  const hasCustomConnect = !!connection.connectString.trim();
+
+  if (!hasBasicConnection && !hasCustomConnect) {
+    appendLog(null, 'error', '请完善主机、端口、服务名或提供完整的自定义连接字符串。');
+    return false;
+  }
+
+  return true;
+}
+
 async function runExecution(items: ScriptItem[]) {
   if (items.length === 0 || isExecuting.value) {
     return;
   }
 
+  if (!validateConnectionParameters()) {
+    return;
+  }
+
   const files = items.map((item) => item.path);
+  executionQueue.value = [...files];
+
   scripts.value.forEach((item) => {
     if (files.includes(item.path)) {
       item.status = 'pending';
@@ -362,6 +389,9 @@ async function runExecution(items: ScriptItem[]) {
     });
   } finally {
     isExecuting.value = false;
+    if (executionQueue.value.length > 0) {
+      executionQueue.value = [];
+    }
     currentExecutingPath.value = null;
   }
 }

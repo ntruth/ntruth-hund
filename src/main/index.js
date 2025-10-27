@@ -195,7 +195,17 @@ async function executeScripts({ files, connection }, { onProgress } = {}) {
   const results = [];
   let dbConnection;
   try {
+    onProgress?.({
+      filePath: null,
+      status: 'running',
+      message: '正在连接数据库...'
+    });
     dbConnection = await oracledb.getConnection(options);
+    onProgress?.({
+      filePath: null,
+      status: 'success',
+      message: '数据库连接成功。'
+    });
     for (const filePath of files) {
       try {
         onProgress?.({

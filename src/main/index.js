@@ -37,16 +37,88 @@ const SQLPLUS_SET_OPTIONS = new Set([
   'trimspool'
 ]);
 
+function stripOracleComments(value) {
+  if (!value) {
+    return '';
+  }
+
+  let result = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const next = index + 1 < value.length ? value[index + 1] : '';
+
+    if (!inSingleQuote && !inDoubleQuote) {
+      if (!inLineComment && !inBlockComment && char === '-' && next === '-') {
+        inLineComment = true;
+        index += 1;
+        continue;
+      }
+      if (!inLineComment && !inBlockComment && char === '/' && next === '*') {
+        inBlockComment = true;
+        index += 1;
+        continue;
+      }
+    }
+
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false;
+        result += '\n';
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === '\n') {
+        result += '\n';
+      }
+      if (char === '*' && next === '/') {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (!inDoubleQuote && char === "'") {
+      if (inSingleQuote && next === "'") {
+        result += char;
+        result += next;
+        index += 1;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+    } else if (!inSingleQuote && char === '"') {
+      inDoubleQuote = !inDoubleQuote;
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
 function sanitizeForPlSqlDetection(segment) {
   if (!segment) {
     return '';
   }
 
-  return segment
-    .replace(/\/\*[^]*?\*\//gu, ' ')
-    .replace(/--[^\n]*$/gmu, ' ')
+  const withoutComments = stripOracleComments(segment);
+
+  return withoutComments
     .replace(/'([^']|'')*'/gu, ' ')
     .replace(/"([^"]|"")*"/gu, ' ');
+}
+
+function hasExecutableContent(segment) {
+  if (!segment) {
+    return false;
+  }
+  return stripOracleComments(segment).trim().length > 0;
 }
 
 function removeTrailingSlash(statement) {
@@ -199,7 +271,7 @@ function splitPlainSqlStatements(segment) {
     if (trimmed) {
       let normalized = trimmed.replace(/;+\s*$/u, '').trim();
       normalized = removeTrailingSlash(normalized);
-      if (normalized) {
+      if (normalized && hasExecutableContent(normalized)) {
         statements.push(normalized);
       }
     }
@@ -211,42 +283,52 @@ function splitPlainSqlStatements(segment) {
     const next = index + 1 < segment.length ? segment[index + 1] : '';
 
     if (!inSingleQuote && !inDoubleQuote) {
-      if (!inBlockComment && char === '-' && next === '-') {
+      if (!inLineComment && !inBlockComment && char === '-' && next === '-') {
         inLineComment = true;
-      } else if (!inLineComment && char === '/' && next === '*') {
-        inBlockComment = true;
-      }
-
-      if (inLineComment && char === '\n') {
-        inLineComment = false;
-      }
-
-      if (inBlockComment && char === '*' && next === '/') {
-        current += char;
-        current += next;
         index += 1;
-        inBlockComment = false;
+        continue;
+      }
+      if (!inLineComment && !inBlockComment && char === '/' && next === '*') {
+        inBlockComment = true;
+        index += 1;
         continue;
       }
     }
 
-    if (!inLineComment && !inBlockComment) {
-      if (!inDoubleQuote && char === "'") {
-        if (inSingleQuote && next === "'") {
-          current += char;
-          current += next;
-          index += 1;
-          continue;
-        }
-        inSingleQuote = !inSingleQuote;
-      } else if (!inSingleQuote && char === '"') {
-        inDoubleQuote = !inDoubleQuote;
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false;
+        current += '\n';
       }
+      continue;
+    }
 
-      if (!inSingleQuote && !inDoubleQuote && char === ';') {
-        pushCurrent();
+    if (inBlockComment) {
+      if (char === '\n') {
+        current += '\n';
+      }
+      if (char === '*' && next === '/') {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (!inDoubleQuote && char === "'") {
+      if (inSingleQuote && next === "'") {
+        current += char;
+        current += next;
+        index += 1;
         continue;
       }
+      inSingleQuote = !inSingleQuote;
+    } else if (!inSingleQuote && char === '"') {
+      inDoubleQuote = !inDoubleQuote;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote && char === ';') {
+      pushCurrent();
+      continue;
     }
 
     current += char;
@@ -307,7 +389,7 @@ function splitOracleScriptStatements(script) {
   const statements = [];
   for (const rawSegment of segments) {
     const segment = stripSqlPlusDirectives(rawSegment);
-    if (!segment.trim()) {
+    if (!hasExecutableContent(segment)) {
       continue;
     }
 

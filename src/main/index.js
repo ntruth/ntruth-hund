@@ -37,6 +37,18 @@ const SQLPLUS_SET_OPTIONS = new Set([
   'trimspool'
 ]);
 
+function sanitizeForPlSqlDetection(segment) {
+  if (!segment) {
+    return '';
+  }
+
+  return segment
+    .replace(/\/\*[^]*?\*\//gu, ' ')
+    .replace(/--[^\n]*$/gmu, ' ')
+    .replace(/'([^']|'')*'/gu, ' ')
+    .replace(/"([^"]|"")*"/gu, ' ');
+}
+
 function removeTrailingSlash(statement) {
   if (!statement) {
     return statement;
@@ -154,11 +166,24 @@ function getLeadingKeyword(statement) {
 
 function isLikelyPlSqlBlock(statement) {
   const leading = getLeadingKeyword(statement);
-  if (!leading) {
-    return false;
+  if (leading && PLSQL_PREFIXES.some((prefix) => leading.startsWith(prefix))) {
+    return true;
   }
 
-  return PLSQL_PREFIXES.some((prefix) => leading.startsWith(prefix));
+  const sanitized = sanitizeForPlSqlDetection(statement).toLowerCase();
+  if (/\bdeclare\b/u.test(sanitized) && /\bbegin\b/u.test(sanitized)) {
+    return true;
+  }
+  if (/\bbegin\b/u.test(sanitized) && /\bend\b/u.test(sanitized)) {
+    return true;
+  }
+  if (/(?:\bcreate\s+(?:or\s+replace\s+)?)\b(?:function|procedure|package|trigger|type)\b/u.test(sanitized)) {
+    return true;
+  }
+  if (/\bexception\b/u.test(sanitized) && /\bend\b/u.test(sanitized)) {
+    return true;
+  }
+  return false;
 }
 
 function splitPlainSqlStatements(segment) {

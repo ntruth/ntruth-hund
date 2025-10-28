@@ -102,6 +102,85 @@ function stripOracleComments(value) {
   return result;
 }
 
+function stripLeadingCommentBlocks(segment) {
+  if (!segment) {
+    return '';
+  }
+
+  let remaining = segment.replace(/\r\n/g, '\n');
+
+  while (true) {
+    remaining = remaining.replace(/^\s+/u, '');
+    if (!remaining) {
+      return '';
+    }
+
+    if (remaining.startsWith('--')) {
+      const newlineIndex = remaining.indexOf('\n');
+      if (newlineIndex === -1) {
+        return '';
+      }
+      remaining = remaining.slice(newlineIndex + 1);
+      continue;
+    }
+
+    if (remaining.startsWith('/*')) {
+      const endIndex = remaining.indexOf('*/');
+      if (endIndex === -1) {
+        return '';
+      }
+      remaining = remaining.slice(endIndex + 2);
+      continue;
+    }
+
+    break;
+  }
+
+  return remaining;
+}
+
+function stripTrailingCommentBlocks(segment) {
+  if (!segment) {
+    return '';
+  }
+
+  let remaining = segment.replace(/\r\n/g, '\n');
+
+  while (true) {
+    const trimmed = remaining.replace(/\s+$/u, '');
+    if (trimmed !== remaining) {
+      remaining = trimmed;
+      continue;
+    }
+
+    const blockCommentMatch = remaining.match(/\/\*[\s\S]*?\*\/\s*$/u);
+    if (blockCommentMatch && blockCommentMatch.index !== undefined) {
+      remaining = remaining.slice(0, blockCommentMatch.index);
+      continue;
+    }
+
+    const lineCommentMatch = remaining.match(/(?:^|\n)\s*--.*$/u);
+    if (lineCommentMatch && lineCommentMatch.index + lineCommentMatch[0].length === remaining.length) {
+      remaining = remaining.slice(0, lineCommentMatch.index);
+      continue;
+    }
+
+    break;
+  }
+
+  return remaining;
+}
+
+function stripSurroundingComments(segment) {
+  if (!segment) {
+    return '';
+  }
+
+  const withoutLeading = stripLeadingCommentBlocks(segment);
+  const withoutTrailing = stripTrailingCommentBlocks(withoutLeading);
+  return withoutTrailing.trim();
+}
+
 function sanitizeForPlSqlDetection(segment) {
   if (!segment) {
     return '';
@@ -271,6 +350,7 @@ function splitPlainSqlStatements(segment) {
     if (trimmed) {
       let normalized = trimmed.replace(/;+\s*$/u, '').trim();
       normalized = removeTrailingSlash(normalized);
+      normalized = stripSurroundingComments(normalized);
       if (normalized && hasExecutableContent(normalized)) {
         statements.push(normalized);
       }
@@ -395,8 +475,9 @@ function splitOracleScriptStatements(script) {
 
     if (isLikelyPlSqlBlock(segment)) {
       const trimmed = removeTrailingSlash(segment.trim());
-      if (trimmed) {
-        statements.push(trimmed);
+      const cleaned = stripSurroundingComments(trimmed);
+      if (cleaned) {
+        statements.push(cleaned);
       }
     } else {
       statements.push(...splitPlainSqlStatements(segment));

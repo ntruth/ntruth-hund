@@ -5,9 +5,9 @@
   "main": "src/main/index.js",
   "scripts": {
     "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:renderer": "cross-env ROLLUP_SKIP_NODE_RESOLUTION=1 vite --host 127.0.0.1",
     "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development ELECTRON_START_URL=http://127.0.0.1:5173 electron .",
-    "build": "vite build",
+    "build": "cross-env ROLLUP_SKIP_NODE_RESOLUTION=1 vite build",
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {

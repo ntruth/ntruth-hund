@@ -1,0 +1,30 @@
+{
+  "name": "ntruth-hund",
+  "version": "0.1.0",
+  "description": "Electron + Vue 3 tool for searching and executing database scripts",
+  "main": "src/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "node scripts/run-vite.js dev --host 127.0.0.1",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && cross-env NODE_ENV=development ELECTRON_START_URL=http://127.0.0.1:5173 electron .",
+    "build": "node scripts/run-vite.js build",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "chardet": "^1.4.0",
+    "diff": "^5.1.0",
+    "electron": "^28.2.4",
+    "monaco-editor": "^0.45.0",
+    "iconv-lite": "^0.6.3",
+    "vue": "^3.4.15"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.6",
+    "vue-tsc": "^1.8.27",
+    "wait-on": "^7.0.1"
+  }
+}

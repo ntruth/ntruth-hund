@@ -1101,6 +1101,7 @@ watch(
   () => {
     leftDoc.value = prepareDocument(leftState.content || '', ignoreOptions, leftState.path);
     updateModel('left');
+    nextTick(() => layoutEditors());
     if (mode.value === 'merge' && readyForMerge.value) {
       applyMergePlan();
     }
@@ -1113,6 +1114,7 @@ watch(
     rightDoc.value = prepareDocument(rightState.content || '', ignoreOptions, rightState.path);
     updateModel('right');
     updateResultModel(rightState.path || leftState.path || baseState.path);
+    nextTick(() => layoutEditors());
     if (mode.value === 'merge' && readyForMerge.value) {
       applyMergePlan();
     }
@@ -1124,6 +1126,7 @@ watch(
   () => {
     baseDoc.value = prepareDocument(baseState.content || '', ignoreOptions, baseState.path);
     updateModel('base');
+    nextTick(() => layoutEditors());
     if (mode.value === 'merge' && readyForMerge.value) {
       applyMergePlan();
     }
@@ -1441,7 +1444,9 @@ onBeforeUnmount(() => {
 }
 
 .diff-panel__editor {
+  flex: 1 1 420px;
   min-height: 420px;
+  position: relative;
 }
 
 .merge-grid {
@@ -1451,6 +1456,8 @@ onBeforeUnmount(() => {
 }
 
 .merge-column {
+  display: flex;
+  flex-direction: column;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   overflow: hidden;
@@ -1470,12 +1477,13 @@ onBeforeUnmount(() => {
 }
 
 .merge-column__editor {
+  flex: 1 1 260px;
   min-height: 260px;
+  position: relative;
 }
 
 .merge-column__editor--shared {
-  min-height: 0;
-  height: 260px;
+  min-height: 260px;
 }
 
 .merge-result {
@@ -1512,7 +1520,9 @@ onBeforeUnmount(() => {
 }
 
 .merge-result__editor {
+  flex: 1 1 360px;
   min-height: 360px;
+  position: relative;
 }
 
 .conflict-list {

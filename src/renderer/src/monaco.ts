@@ -1,3 +1,4 @@
+import 'monaco-editor/esm/vs/editor/editor.all.css';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker.js?worker';
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker.js?worker';

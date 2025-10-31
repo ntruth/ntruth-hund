@@ -1,5 +1,12 @@
 <template>
-  <div class="compare">
+  <div
+    ref="compareRoot"
+    class="compare"
+    @dragover.prevent="handleRootDragOver"
+    @dragenter.prevent="handleRootDragEnter"
+    @dragleave="handleRootDragLeave"
+    @drop.prevent="handleGlobalDrop"
+  >
     <div class="compare__controls">
       <div
         class="file-card"
@@ -9,7 +16,7 @@
         }"
         @dragover.prevent
         @dragenter.prevent="setDragTarget('left')"
-        @dragleave="clearDragTarget"
+        @dragleave="handleDragLeave"
         @drop.prevent="handleDrop($event, 'left')"
       >
         <header class="file-card__header">
@@ -60,7 +67,7 @@
         }"
         @dragover.prevent
         @dragenter.prevent="setDragTarget('right')"
-        @dragleave="clearDragTarget"
+        @dragleave="handleDragLeave"
         @drop.prevent="handleDrop($event, 'right')"
       >
         <header class="file-card__header">
@@ -110,7 +117,7 @@
         }"
         @dragover.prevent
         @dragenter.prevent="setDragTarget('base')"
-        @dragleave="clearDragTarget"
+        @dragleave="handleDragLeave"
         @drop.prevent="handleDrop($event, 'base')"
       >
         <header class="file-card__header">
@@ -183,13 +190,41 @@
           <p>请选择左、右两个文件，或拖拽文件到卡片中以查看差异。</p>
         </div>
         <div v-else class="diff-grid">
-          <div class="diff-panel">
+          <div
+            class="diff-panel"
+            :class="{ 'diff-panel--drag': dragTarget === 'left' }"
+            @dragover.prevent="onPanelDragOver($event, 'left')"
+            @dragenter.prevent="setDragTarget('left')"
+            @dragleave="handleDragLeave"
+            @drop.prevent="handleDrop($event, 'left')"
+          >
             <header class="diff-panel__header">源文件</header>
-            <div ref="leftEditorEl" class="diff-panel__editor"></div>
+            <div
+              ref="leftEditorEl"
+              class="diff-panel__editor"
+              @dragover.prevent="onPanelDragOver($event, 'left')"
+              @dragenter.prevent="setDragTarget('left')"
+              @dragleave="handleDragLeave"
+              @drop.prevent="handleDrop($event, 'left')"
+            ></div>
           </div>
-          <div class="diff-panel">
+          <div
+            class="diff-panel"
+            :class="{ 'diff-panel--drag': dragTarget === 'right' }"
+            @dragover.prevent="onPanelDragOver($event, 'right')"
+            @dragenter.prevent="setDragTarget('right')"
+            @dragleave="handleDragLeave"
+            @drop.prevent="handleDrop($event, 'right')"
+          >
             <header class="diff-panel__header">目标文件</header>
-            <div ref="rightEditorEl" class="diff-panel__editor"></div>
+            <div
+              ref="rightEditorEl"
+              class="diff-panel__editor"
+              @dragover.prevent="onPanelDragOver($event, 'right')"
+              @dragenter.prevent="setDragTarget('right')"
+              @dragleave="handleDragLeave"
+              @drop.prevent="handleDrop($event, 'right')"
+            ></div>
           </div>
         </div>
       </section>
@@ -199,17 +234,59 @@
           <p>请选择基线、源文件与目标文件后即可执行三方合并。</p>
         </div>
         <div v-else class="merge-grid">
-          <div class="merge-column">
+          <div
+            class="merge-column"
+            :class="{ 'merge-column--drag': dragTarget === 'base' }"
+            @dragover.prevent="onPanelDragOver($event, 'base')"
+            @dragenter.prevent="setDragTarget('base')"
+            @dragleave="handleDragLeave"
+            @drop.prevent="handleDrop($event, 'base')"
+          >
             <header>基线文件</header>
-            <div ref="baseEditorEl" class="merge-column__editor"></div>
+            <div
+              ref="baseEditorEl"
+              class="merge-column__editor"
+              @dragover.prevent="onPanelDragOver($event, 'base')"
+              @dragenter.prevent="setDragTarget('base')"
+              @dragleave="handleDragLeave"
+              @drop.prevent="handleDrop($event, 'base')"
+            ></div>
           </div>
-          <div class="merge-column">
+          <div
+            class="merge-column"
+            :class="{ 'merge-column--drag': dragTarget === 'left' }"
+            @dragover.prevent="onPanelDragOver($event, 'left')"
+            @dragenter.prevent="setDragTarget('left')"
+            @dragleave="handleDragLeave"
+            @drop.prevent="handleDrop($event, 'left')"
+          >
             <header>源文件（左）</header>
-            <div ref="leftEditorEl" class="merge-column__editor merge-column__editor--shared"></div>
+            <div
+              ref="leftEditorEl"
+              class="merge-column__editor merge-column__editor--shared"
+              @dragover.prevent="onPanelDragOver($event, 'left')"
+              @dragenter.prevent="setDragTarget('left')"
+              @dragleave="handleDragLeave"
+              @drop.prevent="handleDrop($event, 'left')"
+            ></div>
           </div>
-          <div class="merge-column">
+          <div
+            class="merge-column"
+            :class="{ 'merge-column--drag': dragTarget === 'right' }"
+            @dragover.prevent="onPanelDragOver($event, 'right')"
+            @dragenter.prevent="setDragTarget('right')"
+            @dragleave="handleDragLeave"
+            @drop.prevent="handleDrop($event, 'right')"
+          >
             <header>目标文件（右）</header>
-            <div ref="rightEditorEl" class="merge-column__editor merge-column__editor--shared"></div>
+            <div
+              ref="rightEditorEl"
+              class="merge-column__editor merge-column__editor--shared"
+              @dragover.prevent="onPanelDragOver($event, 'right')"
+              @dragenter.prevent="setDragTarget('right')"
+              @dragleave="handleDragLeave"
+              @drop.prevent="handleDrop($event, 'right')"
+            ></div>
           </div>
         </div>
         <div v-if="readyForMerge" class="merge-result">
@@ -349,6 +426,7 @@ const leftState = reactive<FileState>(createFileState());
 const rightState = reactive<FileState>(createFileState());
 const baseState = reactive<FileState>(createFileState());
 
+const compareRoot = ref<HTMLDivElement | null>(null);
 const leftEditorEl = ref<HTMLDivElement | null>(null);
 const rightEditorEl = ref<HTMLDivElement | null>(null);
 const baseEditorEl = ref<HTMLDivElement | null>(null);
@@ -363,6 +441,9 @@ let leftModel: monaco.editor.ITextModel | null = null;
 let rightModel: monaco.editor.ITextModel | null = null;
 let baseModel: monaco.editor.ITextModel | null = null;
 let resultModel: monaco.editor.ITextModel | null = null;
+
+let leftScrollDisposable: monaco.IDisposable | null = null;
+let rightScrollDisposable: monaco.IDisposable | null = null;
 
 let leftDecorations: string[] = [];
 let rightDecorations: string[] = [];
@@ -491,6 +572,23 @@ function clearDragTarget() {
   dragTarget.value = null;
 }
 
+function handleDragLeave(event: DragEvent) {
+  const current = event.currentTarget as HTMLElement | null;
+  const related = event.relatedTarget as Node | null;
+  if (!current || !related || !current.contains(related)) {
+    clearDragTarget();
+  }
+}
+
+function onPanelDragOver(event: DragEvent, side: MergeSide) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+  if (dragTarget.value !== side) {
+    dragTarget.value = side;
+  }
+}
+
 async function pickFile(side: MergeSide) {
   const state = getState(side);
   const selected = await window.api.selectFile({
@@ -500,25 +598,105 @@ async function pickFile(side: MergeSide) {
   if (!selected) {
     return;
   }
-  state.path = selected;
-  state.selectedEncoding = 'auto';
+  await assignFileToSide(side, selected);
+}
+
+async function assignFileToSide(side: MergeSide, path: string, encoding: DiffEncodingOption = 'auto') {
+  const state = getState(side);
+  state.path = path;
+  state.selectedEncoding = encoding;
   await loadFile(side);
 }
 
-async function handleDrop(event: DragEvent, side: MergeSide) {
-  clearDragTarget();
-  const file = event.dataTransfer?.files?.[0];
-  if (!file || !file.path) {
+async function assignFilesFromDrop(
+  fileList: FileList | File[] | undefined,
+  preferredSide?: MergeSide
+) {
+  if (!fileList) {
     return;
   }
-  const state = getState(side);
-  state.path = file.path;
-  state.selectedEncoding = 'auto';
-  await loadFile(side);
+  type DroppedFile = File & { path?: string };
+  const files = Array.from(fileList as ArrayLike<DroppedFile>).filter((file) => Boolean(file?.path));
+  if (!files.length) {
+    return;
+  }
+
+  const order: MergeSide[] = mode.value === 'merge' ? ['left', 'right', 'base'] : ['left', 'right'];
+  let resolvedPreferred = preferredSide;
+  if (resolvedPreferred === 'base' && mode.value !== 'merge') {
+    resolvedPreferred = 'left';
+  }
+  if (resolvedPreferred) {
+    const index = order.indexOf(resolvedPreferred);
+    if (index > 0) {
+      order.splice(index, 1);
+      order.unshift(resolvedPreferred);
+    } else if (index === -1) {
+      order.unshift(resolvedPreferred);
+    }
+  }
+
+  for (let i = 0; i < files.length && i < order.length; i += 1) {
+    await assignFileToSide(order[i], files[i].path!);
+  }
+}
+
+async function handleDrop(event: DragEvent, side: MergeSide) {
+  event.stopPropagation();
+  await assignFilesFromDrop(event.dataTransfer?.files, side);
+  clearDragTarget();
+}
+
+async function handleGlobalDrop(event: DragEvent) {
+  event.stopPropagation();
+  await assignFilesFromDrop(event.dataTransfer?.files, dragTarget.value ?? inferSideFromPosition(event));
+  clearDragTarget();
 }
 
 async function handleEncodingChange(side: MergeSide) {
   await loadFile(side);
+}
+
+function inferSideFromPosition(event: DragEvent): MergeSide {
+  const root = compareRoot.value;
+  if (!root) {
+    return 'left';
+  }
+  const rect = root.getBoundingClientRect();
+  const relativeX = event.clientX - rect.left;
+  if (mode.value === 'merge') {
+    const third = rect.width / 3;
+    if (relativeX < third) {
+      return 'base';
+    }
+    if (relativeX < third * 2) {
+      return 'left';
+    }
+    return 'right';
+  }
+  return relativeX < rect.width / 2 ? 'left' : 'right';
+}
+
+function handleRootDragEnter(event: DragEvent) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+  dragTarget.value = inferSideFromPosition(event);
+}
+
+function handleRootDragOver(event: DragEvent) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+  dragTarget.value = inferSideFromPosition(event);
+}
+
+function handleRootDragLeave(event: DragEvent) {
+  const current = event.currentTarget as HTMLElement | null;
+  const related = event.relatedTarget as Node | null;
+  if (!current || !related || !current.contains(related)) {
+    clearDragTarget();
+  }
 }
 
 async function loadFile(side: MergeSide) {
@@ -585,12 +763,16 @@ function switchMode(target: CompareMode) {
   if (target === 'merge') {
     nextTick(() => {
       layoutEditors();
+      attachScrollSync();
       if (readyForMerge.value) {
         applyMergePlan();
       }
     });
   } else {
-    nextTick(layoutEditors);
+    nextTick(() => {
+      layoutEditors();
+      attachScrollSync();
+    });
   }
 }
 
@@ -599,6 +781,38 @@ function layoutEditors() {
   rightEditor?.layout();
   baseEditor?.layout();
   resultEditor?.layout();
+}
+
+function attachScrollSync() {
+  leftScrollDisposable?.dispose();
+  rightScrollDisposable?.dispose();
+
+  if (!leftEditor || !rightEditor) {
+    return;
+  }
+
+  let syncingLeft = false;
+  let syncingRight = false;
+
+  leftScrollDisposable = leftEditor.onDidScrollChange((event) => {
+    if (syncingLeft) {
+      syncingLeft = false;
+      return;
+    }
+    syncingRight = true;
+    rightEditor.setScrollTop(event.scrollTop);
+    rightEditor.setScrollLeft(event.scrollLeft);
+  });
+
+  rightScrollDisposable = rightEditor.onDidScrollChange((event) => {
+    if (syncingRight) {
+      syncingRight = false;
+      return;
+    }
+    syncingLeft = true;
+    leftEditor.setScrollTop(event.scrollTop);
+    leftEditor.setScrollLeft(event.scrollLeft);
+  });
 }
 
 function updateModel(side: MergeSide) {
@@ -958,6 +1172,7 @@ onMounted(() => {
   updateModel('right');
   updateModel('base');
   updateResultModel(rightState.path || leftState.path || baseState.path);
+  attachScrollSync();
   layoutEditors();
 });
 
@@ -970,6 +1185,8 @@ onBeforeUnmount(() => {
   rightEditor?.dispose();
   baseEditor?.dispose();
   resultEditor?.dispose();
+  leftScrollDisposable?.dispose();
+  rightScrollDisposable?.dispose();
 });
 </script>
 
@@ -1208,6 +1425,12 @@ onBeforeUnmount(() => {
   border-radius: 16px;
   overflow: hidden;
   background: #fdfdfd;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.diff-panel--drag {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
 }
 
 .diff-panel__header {
@@ -1232,6 +1455,12 @@ onBeforeUnmount(() => {
   border-radius: 16px;
   overflow: hidden;
   background: #f9fafb;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.merge-column--drag {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
 }
 
 .merge-column header {

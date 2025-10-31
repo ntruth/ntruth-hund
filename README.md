@@ -15,7 +15,7 @@ npm run dev
 
 - `npm run dev` 将在 `http://127.0.0.1:5173` 启动 Vite 开发服务器，并在准备就绪后启动 Electron。
 - 如果需要打包渲染进程资源，可运行 `npm run build` 生成 `dist` 目录。
-- Windows 环境下 `npm run dev` 和 `npm run build` 会自动设置 `ROLLUP_SKIP_NODE_RESOLUTION=1`，避免 npm 在安装可选的 Rollup 原生包时出现 `@rollup/rollup-win32-x64-msvc` 缺失报错。
+- Windows 环境下 `npm run dev` 和 `npm run build` 通过 `scripts/run-vite.js` 预设 `ROLLUP_SKIP_NODE_RESOLUTION=1` 并禁用 Rollup 原生模块，可避免 `@rollup/rollup-win32-x64-msvc` 缺失导致的报错。
 - 项目已升级到 Vite 5 与 `@vitejs/plugin-vue` 5.x，如遇旧依赖缓存导致的异常（例如开发页空白、`Maximum call stack size exceeded` 报错），请删除 `node_modules` 后重新执行 `npm install`。
 
 > **注意**：执行脚本功能依赖 [`oracledb`](https://www.npmjs.com/package/oracledb) 模块以及对应的 Oracle 客户端库，请在目标运行环境中提前安装并配置。

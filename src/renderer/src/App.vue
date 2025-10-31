@@ -22,13 +22,24 @@
         >
           脚本执行
         </button>
+        <button
+          type="button"
+          class="sidebar__item"
+          :class="{ 'sidebar__item--active': activeView === 'compare' }"
+          @click="activeView = 'compare'"
+        >
+          文件比对
+        </button>
       </aside>
       <main class="content">
         <section v-if="activeView === 'search'" class="panel">
           <FileSearchSection />
         </section>
-        <section v-else class="panel">
+        <section v-else-if="activeView === 'execute'" class="panel">
           <ScriptExecutorSection />
+        </section>
+        <section v-else class="panel">
+          <FileCompareSection />
         </section>
       </main>
     </div>
@@ -39,8 +50,9 @@
 import { ref } from 'vue';
 import FileSearchSection from './components/FileSearchSection.vue';
 import ScriptExecutorSection from './components/ScriptExecutorSection.vue';
+import FileCompareSection from './components/FileCompareSection.vue';
 
-const activeView = ref<'search' | 'execute'>('search');
+const activeView = ref<'search' | 'execute' | 'compare'>('search');
 </script>
 
 <style scoped>

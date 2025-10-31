@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const chardet = require('chardet');
+const iconv = require('iconv-lite');
 
 const ALLOWED_SEARCH_EXTENSIONS = new Set(['.sql', '.xml']);
 const SCRIPT_EXTENSIONS = new Set(['.sql', '.pck']);
@@ -36,6 +38,108 @@ const SQLPLUS_SET_OPTIONS = new Set([
   'trimout',
   'trimspool'
 ]);
+
+const SUPPORTED_TEXT_ENCODINGS = new Set(['utf8', 'gbk', 'utf16le', 'utf16be']);
+
+function normalizeEncodingName(value) {
+  if (!value) {
+    return 'utf8';
+  }
+
+  const normalized = String(value).toLowerCase();
+  if (normalized === 'auto') {
+    return 'auto';
+  }
+  if (normalized.includes('utf-16be') || normalized.includes('utf16be')) {
+    return 'utf16be';
+  }
+  if (normalized.includes('utf-16le') || normalized.includes('utf16le')) {
+    return 'utf16le';
+  }
+  if (normalized.includes('utf-16')) {
+    return 'utf16le';
+  }
+  if (normalized.includes('gbk') || normalized.includes('gb2312') || normalized.includes('gb18030')) {
+    return 'gbk';
+  }
+  if (normalized.includes('utf8') || normalized.includes('utf-8')) {
+    return 'utf8';
+  }
+  return 'utf8';
+}
+
+function resolveIconvEncoding(encoding) {
+  switch (encoding) {
+    case 'utf16be':
+      return 'utf16-be';
+    case 'utf16le':
+      return 'utf16le';
+    case 'gbk':
+      return 'gbk';
+    case 'utf8':
+    default:
+      return 'utf8';
+  }
+}
+
+function detectEncoding(buffer) {
+  try {
+    const detected = chardet.detect(buffer);
+    const normalized = normalizeEncodingName(detected);
+    if (SUPPORTED_TEXT_ENCODINGS.has(normalized)) {
+      return normalized;
+    }
+  } catch (error) {
+    console.warn('Failed to detect file encoding:', error);
+  }
+  return 'utf8';
+}
+
+async function loadTextFile(filePath, preferredEncoding = 'auto') {
+  const buffer = await fs.promises.readFile(filePath);
+  const requestedEncoding = normalizeEncodingName(preferredEncoding);
+  const detectedEncoding = detectEncoding(buffer);
+  let effectiveEncoding = requestedEncoding !== 'auto' ? requestedEncoding : detectedEncoding;
+  if (!SUPPORTED_TEXT_ENCODINGS.has(effectiveEncoding)) {
+    effectiveEncoding = 'utf8';
+  }
+
+  const decode = (encoding) => {
+    const iconvEncoding = resolveIconvEncoding(encoding);
+    return iconv.decode(buffer, iconvEncoding).replace(/^\uFEFF/u, '');
+  };
+
+  try {
+    const content = decode(effectiveEncoding);
+    return {
+      success: true,
+      content,
+      encoding: effectiveEncoding,
+      detectedEncoding
+    };
+  } catch (error) {
+    console.warn(`Failed to decode ${filePath} with ${effectiveEncoding}:`, error);
+    if (effectiveEncoding !== 'utf8') {
+      try {
+        const fallbackContent = decode('utf8');
+        return {
+          success: true,
+          content: fallbackContent,
+          encoding: 'utf8',
+          detectedEncoding
+        };
+      } catch (fallbackError) {
+        console.error(`Failed to decode ${filePath} with UTF-8 fallback:`, fallbackError);
+      }
+    }
+    return {
+      success: false,
+      message: error.message,
+      encoding: effectiveEncoding,
+      detectedEncoding
+    };
+  }
+}
 
 function stripOracleComments(value) {
   if (!value) {
@@ -238,8 +342,28 @@ function isSqlPlusDirective(line) {
   if (lower.startsWith('connect ') || lower.startsWith('disconnect')) {
     return true;
   }
-  if (lower === 'exit' || lower.startsWith('exit ')) {
+  if (lower === 'exit' || lower === 'exit;') {
     return true;
+  }
+  if (lower.startsWith('exit ')) {
+    const rest = lower.slice(4).trim();
+    const withoutSemicolon = rest.endsWith(';') ? rest.slice(0, -1).trim() : rest;
+    if (!withoutSemicolon) {
+      return true;
+    }
+    if (withoutSemicolon.startsWith('when ')) {
+      return false;
+    }
+    if (/^(?:success|failure|warning)(?:\s|$)/u.test(withoutSemicolon)) {
+      return true;
+    }
+    if (/^\d+(?:\s|$)/u.test(withoutSemicolon)) {
+      return true;
+    }
+    if (/^sql\./u.test(withoutSemicolon) || /^:/.test(withoutSemicolon)) {
+      return true;
+    }
+    return false;
   }
   if (lower.startsWith('rem ') || lower === 'rem' || lower.startsWith('remark ')) {
     return true;
@@ -899,6 +1023,19 @@ ipcMain.handle('dialog:selectDirectory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('dialog:selectFile', async (_event, options = {}) => {
+  const dialogOptions = {
+    properties: ['openFile'],
+    filters: Array.isArray(options.filters) ? options.filters : undefined,
+    defaultPath: typeof options.defaultPath === 'string' ? options.defaultPath : undefined
+  };
+  const result = await dialog.showOpenDialog(dialogOptions);
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
 ipcMain.handle('search:files', async (_event, payload) => {
   if (!payload || !payload.directory || !payload.keyword) {
     return [];
@@ -930,6 +1067,28 @@ ipcMain.handle('scripts:execute', async (_event, payload) => {
       }
     }
   });
+});
+
+ipcMain.handle('diff:loadFile', async (_event, payload) => {
+  if (!payload || !payload.path) {
+    return {
+      success: false,
+      message: 'File path is required.'
+    };
+  }
+
+  try {
+    const result = await loadTextFile(payload.path, payload.encoding ?? 'auto');
+    return {
+      ...result,
+      path: payload.path
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error.message
+    };
+  }
 });
 
 ipcMain.handle('path:open', async (_event, filePath) => {

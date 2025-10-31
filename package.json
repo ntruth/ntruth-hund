@@ -11,7 +11,10 @@
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "chardet": "^1.4.0",
+    "diff": "^5.1.0",
     "electron": "^28.2.4",
+    "iconv-lite": "^0.6.3",
     "vue": "^3.4.15"
   },
   "devDependencies": {

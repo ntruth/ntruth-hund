@@ -26,10 +26,32 @@ export interface ScriptExecutionPayload {
   };
 }
 
+export type DiffEncodingOption = 'auto' | 'utf8' | 'gbk' | 'utf16le' | 'utf16be';
+
+export interface DiffFileDialogOptions {
+  defaultPath?: string;
+  filters?: Array<{ name: string; extensions: string[] }>;
+}
+
+export interface DiffFileLoadRequest {
+  path: string;
+  encoding?: DiffEncodingOption;
+}
+
+export interface DiffFileLoadResult {
+  success: boolean;
+  content?: string;
+  encoding?: string;
+  detectedEncoding?: string;
+  path?: string;
+  message?: string;
+}
+
 declare global {
   interface Window {
     api: {
       selectDirectory: () => Promise<string | null>;
+      selectFile: (options?: DiffFileDialogOptions) => Promise<string | null>;
       searchFiles: (payload: { directory: string; keyword: string }) => Promise<
         Array<{ path: string; name: string; matches: number }>
       >;
@@ -41,6 +63,7 @@ declare global {
       }>;
       openFile: (filePath: string) => Promise<boolean>;
       revealFile: (filePath: string) => Promise<boolean>;
+      loadFileForDiff: (payload: DiffFileLoadRequest) => Promise<DiffFileLoadResult>;
       onScriptProgress: (callback: (payload: ScriptExecutionProgress) => void) => () => void;
     };
   }
